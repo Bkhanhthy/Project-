@@ -1,0 +1,337 @@
+---
+title: "Final project 220"
+author: "Thy Bui"
+date: "2024-04-22"
+output:
+    html_document:
+    toc_float:
+      toc_collapsed: true
+    code_folding: hide
+    theme: cosmo
+    toc: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, include=FALSE}
+setwd("C:/Users/bkhan/OneDrive/Documents/Spring 2024/Math 220/FINAL REPORT")
+library(dplyr)
+library(ggplot2)
+library(rms)
+library(ResourceSelection)
+
+product <- read.csv("product_info.csv")
+
+product <- product %>% 
+  select(loves_count, rating, reviews, price_usd, limited_edition, new, online_only, out_of_stock, sephora_exclusive, child_count)
+```
+
+# Introduction 
+
+In this report, we will investigate the number of people who have marked certain product as favorite based on ratings, reviews, price, the number of its variations and other charateristics (new, online, out of stock, sephora exlusive)
+
+**Why does it matter?**
+
+Researching and analysing the loved product help producers have an insight to consumer behavior and market trend. Therefore, they can build effective makerting campaigns and make more product development that brings more profit. 
+
+## Variables explanation
+
+loves_count:	The number of people who have marked this product as a favorite
+
+rating:	The average rating of the product based on user reviews
+
+reviews:	The number of user reviews for the product
+
+size:	The size of the product, which may be in oz, ml, g, packs, or other units depending on the product type
+
+price_usd:	The price of the product in US dollars
+
+limited_edition: 	Indicates whether the product is a limited edition or not (1-true, 0-false)
+
+new: Indicates whether the product is new or not (1-true, 0-false)
+
+online_only: Indicates whether the product is only sold online or not (1-true, 0-false)
+
+out_of_stock:	Indicates whether the product is currently out of stock or not (1 if true, 0 if false)
+
+sephora_exclusive:	Indicates whether the product is exclusive to Sephora or not (1 if true, 0 if false)
+
+child_count:	The number of variations of the product available
+
+```{r}
+summary(product)
+str(product)
+```
+
+We will do the NA omit as getting rid of these NA does not affect our dataset because the number of NA is small compared to the total observations we got. 
+
+Moreover, limited edition, new, online_only, out_of_stock, and sephora_exclusive are Bernoulli variables as they just have 1 and 0 values. 
+
+```{r}
+product <- na.omit(product)
+```
+
+## Splitting data
+
+```{r}
+N <- seq(8216)
+S <- sample(N,8216/2)
+product_train <- product[S,]
+product_test <- product[-S , ]
+write.csv(product_test, "product_test.csv")
+write.csv(product_train, "product_train.csv")
+```
+
+
+# Model testing
+
+## Checking variables
+
+First, we will do the histogram to check whether we should log the variable or not. 
+```{r}
+product1 <- product_train
+hist(product1$loves_count)
+product1 <- product1 %>%
+  mutate(countLog = log(loves_count+1))
+hist(product1$countLog)
+
+```
+
+The first model has a long tail and is skewed to the right so we consider logging these variables. After logging this variable, the histogram is normally distributed so we can conclude that logging this variable will significant improve our prediction. 
+
+Then, we will do the histogram for all the x variables to see whether we should log it or square it. 
+
+```{r}
+hist(product1$rating)
+hist(product1$reviews)
+hist(product1$price_usd)
+hist(product1$child_count)
+```
+
+It turns out that the histogram for the reviews, price_usd, and child_count are skewed to the right and have a long tail so we consider logging these variables.
+
+```{r}
+product2 <- product1 %>%
+  mutate(priceLog = log(price_usd)) %>%
+  mutate(reviewsLog = log(reviews))%>%
+  mutate(childLog = log(child_count+1))
+hist(product2$priceLog)
+hist(product2$reviewsLog)
+hist(product2$childLog)
+
+```
+
+Logging child_count does not improve the as after logging this variable is skewed to the left. Review and price variables are normally distributed so we would consider reviewsLog and priceLog in our prediction models.
+
+Next, we will see if there is any variable that has high correlation with others. 
+
+```{r}
+product2 <- product2 %>%
+  select(-childLog)
+cor(product2)
+```
+
+No variables have correlation higher than 0.9 so it can be say that all variables might be independent. 
+
+
+Next, we will check to see if we should square any variables through their scatterplots
+
+```{r}
+
+product2 %>%
+  ggplot(aes(priceLog, countLog ))+
+  geom_point()
+
+product2 %>%
+  ggplot(aes(rating, countLog ))+
+  geom_point()
+
+product2 %>%
+  ggplot(aes(reviewsLog, countLog ))+
+  geom_point()
+
+product2 %>%
+  ggplot(aes(child_count, countLog ))+
+  geom_point()
+
+
+```
+
+As the reviewsLog has expotential pattern so we will consider squaring this variables. Moreover, the scatterplot of child_count has a pattern to log it.
+
+# Model testing 
+
+```{r, warning=FALSE}
+product2 <- product2 %>%
+  select(-loves_count, -price_usd, - reviews)
+
+glm<-glm(countLog ~., product2, family = poisson)
+summary(glm)
+  
+```
+
+In the original model, we see the out_of_stock and sephora have the p-value >0.05 so we fail to reject the Null hypothesis or saying that this variable might not statistically significant in predicting love counting. Therefore, we will consider dropping this variable.
+
+```{r, warning = FALSE}
+glm1<-glm(countLog ~ rating + limited_edition + new + online_only + child_count + priceLog + reviewsLog, product2, family = poisson)
+summary(glm1)
+```
+
+After dropping out_of_stock variables, we have a model with lower Residual deviance and all variables are significant as they have the p-value <0.05.
+
+However, we will try the model with quadratic and logging terms from the result of the graph to see if doing this can improve our model 
+
+```{r, warning=FALSE}
+product3 <- product2 %>%
+  mutate(reviewsLogS = reviewsLog^2)
+
+glm2 <- glm(countLog ~ reviewsLog + reviewsLogS + new + online_only + sephora_exclusive + out_of_stock + child_count + priceLog, product3, family = poisson)
+summary(glm2)
+glm2 <- glm(countLog ~ reviewsLog + new + online_only + child_count + priceLog, product3, family = poisson)
+summary(glm2)
+
+glm3 <- glm(countLog ~ reviewsLogS + new + online_only + sephora_exclusive + out_of_stock + child_count + priceLog, product3, family = poisson)
+summary(glm3)
+glm3 <- glm(countLog ~ reviewsLogS + new + online_only + sephora_exclusive + child_count + priceLog, product3, family = poisson)
+summary(glm3)
+
+
+glm4 <- glm(countLog ~ reviewsLogS  + new + online_only + sephora_exclusive + out_of_stock + priceLog, product3, family = poisson)
+summary(glm4)
+glm4 <- glm(countLog ~ reviewsLogS  + new + online_only + sephora_exclusive +  priceLog, product3, family = poisson)
+summary(glm4)
+
+```
+
+Comparing the model with quadratic terms and logging terms (glm2) with the model without it (glm1), although in both models all variables are significant, it turns out that the glm1 has the lower residual deviance, meaning that glm1 is a better fit to the data.
+
+```{r}
+summary(glm1)
+```
+
+
+## Coefficient explaination 
+
+Intercept: The intercept coefficient (2.1345984) indicates that when all predictor variables are zero, the expected log count of "loves_count" is approximately 2.1346.
+
+Rating: For each one-unit increase in rating, the expected log count of "loves_count" decreases by approximately 0.0252. This variable is significant in predicting "loves_count" as its p-value (0.018070) is less than 0.05.
+
+Limited Edition: Increasing the limited edition by one unit is associated with an increase of approximately 0.0897 in the expected log count of "loves_count". As p-value (6.16e-05) less than 0.05, we reject the Null hypothesis or saying that this variable is significant in predicting "loves_count".
+
+New: Each one-unit increase in the "new" variable leads to a decrease of approximately 0.0829 in the expected log count of "loves_count". As p-value (0.000396) less than 0.05, we reject the Null hypothesis or saying that this predictor is significant in predicting "loves_count".
+
+Online Only: Increasing the "online_only" variable by one unit is associated with a decrease of approximately 0.0410 in the expected log count of "loves_count".  As p-value (0.002985) less than 0.05, we reject the Null hypothesis or saying that this predictor is significant in predicting "loves_count".
+
+Child Count: Each one-unit increase in "child_count" results in an increase of approximately 0.0035 in the expected log count of "loves_count". As p-value less than 0.05, we reject the Null hypothesis or saying that this predictor is significant in predicting "loves_count"..
+
+PriceLog: Increasing the log of price by one unit is associated with a decrease of approximately 0.0196 in the expected log count of "loves_count".  As p-value (0.006338) less than 0.05, we reject the Null hypothesis or saying that this predictor is significant in predicting "loves_count".
+
+ReviewsLog: Each one-unit increase in the log of reviews leads to an increase of approximately 0.0568 in the expected log count of "loves_count".  As p-value less than 0.05, we reject the Null hypothesis or saying that this predictor is significant in predicting "loves_count".
+
+Null Deviance: The null deviance  1274.52 represents the deviance when only the intercept is included in the model.
+
+Residual Deviance: The residual deviance 711.64 represents the deviance when the predictors are included.
+
+## Deviance test
+
+```{r}
+1-pchisq(711.64, 4100)
+```
+
+The deviance is >0.05 so say that this model is not overdispersion.  
+
+# Mathematical validation 
+
+```{r}
+product4 <- product2 %>%
+  mutate(res = residuals(glm1, type = "deviance"), fit = fitted.values(glm1))
+
+product4 %>% 
+  ggplot(aes(fit,res))+
+  geom_point()
+
+```
+
+We can see a little polarization here so we would make an outlier to see a clearer pattern. 
+
+```{r}
+product5 <- product4 %>% 
+  filter(res >= -2)%>%
+  filter(fit <= 12)
+
+product5 %>% 
+  ggplot(aes(fit,res))+
+  geom_point()
+```
+
+It can be seen that there is no clear pattern there so we can conclude that our model is fulfill our mathematical assumption. 
+
+## 0 inflation check 
+```{r}
+sum(exp(-product5$fit))
+table(product5$loves_count)
+```
+
+The predicted 0 of the model is 0.7125515, which is really low so we can conclude that our model does not have 0 inflation.
+
+# Testing model on test set
+
+```{r, warning=FALSE}
+product_test1 <- product_test %>%
+  mutate(countLog = log(loves_count+1))%>%
+  mutate(reviewsLog = log(reviews+1))%>%
+  mutate(priceLog = log(price_usd+1)) %>%
+  select(-loves_count, -reviews, -price_usd)
+  
+glmtest <- glm(countLog ~ rating + limited_edition + new + online_only + 
+    child_count + priceLog + reviewsLog, family = poisson, data = product_test1)
+summary(glmtest)
+
+```
+
+On the test model, 7 out of 8 variables are significant. Moreover, the residual deviance is much lower than the degree of freedom.
+
+
+# Prediction 
+
+```{r}
+exp(2.1301681 -0.0226993*4 +0.0634690*1 -0.0840448*1 -0.0452321*0 + 0.0035411*1 -0.0185623 *4 +  0.0554389*4.6) + 1.96*sqrt(exp(2.1301681 -0.0226993*4 +0.0634690*1 -0.0840448*1 -0.0452321*0 + 0.0035411*1 -0.0185623 *4 +  0.0554389*4.6))
+
+exp(2.1301681 -0.0226993*4 +0.0634690*1 -0.0840448*1 -0.0452321*0 + 0.0035411*1 -0.0185623 *4 +  0.0554389*4.6) - 1.96*sqrt(exp(2.1301681 -0.0226993*4 +0.0634690*1 -0.0840448*1 -0.0452321*0 + 0.0035411*1 -0.0185623 *4 +  0.0554389*4.6))
+```
+
+In 95% of time, the probability that loves_count for a product with 4 ratings, be an limited edition, a new version, not only online, the number of variations of the product available is 2, log of price is 3 and log of reviews is 4, ranges from 3.155772 to 14.9504
+
+
+```{r}
+1-exp(-0.0252332)
+exp(0.0897380)-1
+1-exp(-0.0828676)
+1-exp(-0.0409543)
+exp(0.0035028 ) -1
+1-exp(-0.0195712)
+exp(0.0568025)-1 
+```
+
+For each unit increase in rating, the expected value of loves_count increase by 2.24%
+For each unit increase in limited_edition, the expected value of loves_count increase by 9.28%
+For each unit increase in new, the expected value of loves_count increase by 7.95%
+For each unit increase in online_only, the expected value of loves_count increase by 4%
+For each unit increase in child_count, the expected value of loves_count increase by 0.33%
+For each unit increase in priceLog, the expected value of loves_count increase by 1.93%
+For each unit increase in reviewsLog, the expected value of loves_count increase by 5.8%
+
+## Future research 
+
+1. Consumer Behavior Analysis: Explore how different demographic factors influence the likelihood of favoriting a product. 
+
+2. Product Development: By analyzing historical data on favoriting behavior and product attributes, companies can identify trends and preferences to inform product development strategies.
+
+3. Trend Forecasting: Use predictive analytics to forecast emerging trends in the beauty industry. By analyzing data from social media, search trends, and other sources, researchers can identify patterns and predict which products or styles are likely to gain popularity in the future.
+
+4. Competitive Analysis: Compare favoriting behavior across different brands and products within the beauty industry. By analyzing competitor data, companies can benchmark their performance and identify areas where they can gain a competitive advantage.
+
